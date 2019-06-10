@@ -1,10 +1,19 @@
-﻿#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
-
-#include <winsock2.h>
-#include <Windows.h>
-#include <inaddr.h>
-#pragma comment(lib, "ws2_32")
+﻿#ifdef _WIN32
+	#define _WINSOCK_DEPRECATED_NO_WARNINGS
+	#define _CRT_SECURE_NO_WARNINGS
+	#include <winsock2.h>
+	#include <Windows.h>
+	#include <inaddr.h>
+	#pragma comment(lib, "ws2_32")
+	typedef int socklen_t;
+#else
+	#include<unistd.h> //uni std
+	#include<arpa/inet.h>
+	typedef unsigned int SOCKET;
+	#define INVALID_SOCKET  (SOCKET)(~0)
+	#define SOCKET_ERROR            (-1)
+	typedef unsigned int socklen_t;
+#endif
 
 #include <iostream>
 #include <vector>
@@ -19,6 +28,7 @@ int  processor(SOCKET _cSock);
 int main()
 {
 	// 1.请求版本号
+#ifdef _WIN32
 	WSADATA wsaData;
 	int err = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (err != 0)  return -1;
@@ -30,17 +40,23 @@ int main()
 	else {
 		printf("version success");
 	}
+#endif
 
 	// 2.创建一个socket
 	SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
 
 	// 3.创建协议地址族
-	SOCKADDR_IN addrSrv = { 0 };
+	sockaddr_in addrSrv = { 0 };
 	addrSrv.sin_family = AF_INET;
-	addrSrv.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");//IP地址
+#ifdef _WIN32
+	// 如果是服务端，就别用127.0.0.1，因为这是回环地址。
+	addrSrv.sin_addr.S_un.S_addr = INADDR_ANY;
+#else
+	addrSrv.sin_addr.s_addr = INADDR_ANY;
+#endif
 	addrSrv.sin_port = htons(6600);//端口号
-	if (SOCKET_ERROR == bind(serverSocket, (SOCKADDR*)& addrSrv, sizeof(SOCKADDR))) {
+	if (SOCKET_ERROR == bind(serverSocket, (sockaddr*)& addrSrv, sizeof(sockaddr))) {
 		printf("erro, bind port failed\n");
 	}
 	else {
@@ -87,8 +103,8 @@ int main()
 		}
 		if (FD_ISSET(serverSocket, &fdRead)) {
 			FD_CLR(serverSocket, &fdRead);
-			SOCKADDR_IN addr = { 0 };  //存客户端的网络地址
-			int addrlen = sizeof(SOCKADDR_IN);
+			sockaddr_in addr = { 0 };  //存客户端的网络地址
+			socklen_t addrlen = sizeof(sockaddr_in);
 			SOCKET clientSocket = INVALID_SOCKET;
 			clientSocket = accept(serverSocket, (sockaddr*)& addr, &addrlen);//因为select了，所以不会在这里阻塞
 			if (INVALID_SOCKET == clientSocket) {
@@ -99,6 +115,20 @@ int main()
 				printf("accept success, new client: socket = %d, ip = %s\n", clientSocket, inet_ntoa(addr.sin_addr));
 			}
 		}
+		for (unsigned int i = 0; i < g_clients.size(); i++) {
+			if (FD_ISSET(g_clients[i], &fdRead)) {    //该套接字可读
+				if (-1 == processor(g_clients[i])) {
+					auto iter = g_clients.begin();
+					if (iter != g_clients.end()) {
+						g_clients.erase(iter);
+					}
+				}
+			}
+			if (FD_ISSET(g_clients[i], &fdWrite)) {    //该套接字可写
+				// TODO
+			}
+		}
+		/*
 		for (unsigned int n = 0; n < fdRead.fd_count; n++) {
 			if (-1 == processor(fdRead.fd_array[n])) {  //处理客户端请求
 				auto iter = find(g_clients.begin(), g_clients.end(), fdRead.fd_array[n]);
@@ -107,16 +137,24 @@ int main()
 				}
 			}
 		}
+		*/
 		// TODO: 服务器做其它事情，即便没有客户端事件发生。
 		// 空闲时间，处理其它业务
 	}
 
 	// 收尾工作
+#ifdef _WIN32
 	for (int n = g_clients.size() - 1; n >= 0; n--) {
 		closesocket(g_clients[n]);
 	}
 	closesocket(serverSocket);
 	WSACleanup();
+#else
+	for (int n = g_clients.size() - 1; n >= 0; n--) {
+		close(g_clients[n]);
+	}
+	close(serverSocket);
+#endif
 	getchar(); //防止程序一闪而过
 	return	0;
 }
