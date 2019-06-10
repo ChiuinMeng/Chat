@@ -1,13 +1,25 @@
-﻿#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
+﻿// Linux环境编译命令：
+//     g++ -o ChatClient ChatClient.cpp -pthread
 
-#include <winsock2.h>
-#include <Windows.h>
-#include <inaddr.h>
-#pragma comment(lib, "ws2_32")
-
+#ifdef _WIN32
+	#define _WINSOCK_DEPRECATED_NO_WARNINGS
+	#define _CRT_SECURE_NO_WARNINGS
+	#include <winsock2.h>
+	#include <Windows.h>
+	#include <inaddr.h>
+	#pragma comment(lib, "ws2_32")
+#else
+	#include<unistd.h> //uni std
+	#include<arpa/inet.h>
+	typedef unsigned int SOCKET;
+	#define INVALID_SOCKET  (SOCKET)(~0)
+	#define SOCKET_ERROR            (-1)
+#endif
 #include <iostream>
 #include <thread>
+#include <cstring>
+
+#include "DataPacket.h"
 
 #include "DataPacket.h"
 
@@ -27,12 +39,27 @@ int  g_status = STATUS_DEFAULT; //客户端状态
 int processor(SOCKET _cSock);
 int cmdThread(SOCKET _sock);
 
-int main()
+int main(int argc, char* argv[])
 {
+	char ip[16] = "127.0.0.1";
+	if (argc == 2) {
+		strcpy(ip, argv[1]);  //将命令参数设为IP地址
+		printf("从命令行获取到IP参数，ip = %s\n", ip);
+	}
 	// 启动Windows socket 2.x环境
-	WORD ver = MAKEWORD(2, 2);
-	WSADATA dat;
-	WSAStartup(ver, &dat);
+#ifdef _WIN32
+	WSADATA wsaData;
+	int err = WSAStartup(MAKEWORD(2, 2), &wsaData);
+	if (err != 0)  return -1;
+	if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+		WSACleanup();
+		printf("version failed");
+		return -1;
+	}
+	else {
+		printf("version success");
+	}
+#endif
 
 	// 创建socket套接字
 	SOCKET _sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -47,7 +74,11 @@ int main()
 	sockaddr_in name = { 0 };
 	name.sin_family = AF_INET;
 	name.sin_port = htons(6600);
-	name.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
+#ifdef _WIN32
+	name.sin_addr.S_un.S_addr = inet_addr(ip);
+#else
+	name.sin_addr.s_addr = inet_addr(ip);
+#endif
 	if (SOCKET_ERROR == connect(_sock, (sockaddr*)& name, sizeof(sockaddr_in))) {
 		printf("connect socket failed\n");
 		g_bRun = false;
@@ -89,8 +120,12 @@ int main()
 
 
 	// 收尾工作
+#ifdef _WIN32
 	closesocket(_sock);
 	WSACleanup();
+#else
+	close(_sock);
+#endif
 	getchar();
 	return 0;
 }
