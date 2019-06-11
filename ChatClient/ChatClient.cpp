@@ -70,11 +70,22 @@ int main(int argc, char* argv[])
 		printf("create socket success\n");
 	}
 
+	unsigned int uiRcvBuf;
+	int uiRcvBufLen = sizeof(uiRcvBuf);
+	if (-1 != getsockopt(_sock, SOL_SOCKET, SO_SNDBUF, (char*)& uiRcvBuf, &uiRcvBufLen)) {
+		printf("获取系统默认的发送数据缓冲区大小, uiRcvBuf = %d\n", uiRcvBuf);
+	}
+	else {
+		printf("获取系统默认的发送数据缓冲区大小失败\n");
+	}
+
+
 	// 连接socket
 	sockaddr_in name = { 0 };
 	name.sin_family = AF_INET;
 	name.sin_port = htons(6600);
 #ifdef _WIN32
+	// name.sin_addr.S_un.S_addr = htonl(**);
 	name.sin_addr.S_un.S_addr = inet_addr(ip);
 #else
 	name.sin_addr.s_addr = inet_addr(ip);
@@ -104,15 +115,27 @@ int main(int argc, char* argv[])
 		FD_SET(_sock, &fdWrite);
 		FD_SET(_sock, &fdExp);
 		timeval t = { 0,0 };
-		if (select(_sock, &fdRead, &fdWrite, &fdExp, &t) < 0) {
+		int s_r = select(_sock, &fdRead, &fdWrite, &fdExp, &t);
+		if ( s_r < 0) {
 			printf("select failed\n");
 			break;
 		}
-		if (FD_ISSET(_sock, &fdRead)) {    //判断_sock是不是在fdReads集合中
-			FD_CLR(_sock, &fdRead);
-			if (-1 == processor(_sock)) {
-				printf("processor failed\n");
-				break;
+		else if (s_r == 0) {
+			// 指定socket集合无事件发生。
+		}
+		else {
+			if (FD_ISSET(_sock, &fdRead)) {    //若该socket可读，接受数据
+				FD_CLR(_sock, &fdRead);
+				if (-1 == processor(_sock)) {
+					printf("processor failed\n");
+					break;
+				}
+			}
+			if (FD_ISSET(_sock, &fdWrite)) { //若该socket可写，发送数据
+				// TODO
+			}
+			if (FD_ISSET(_sock, &fdExp)) { //若该socket异常
+				// TODO
 			}
 		}
 		// TODO: 空闲时间处理其它业务
