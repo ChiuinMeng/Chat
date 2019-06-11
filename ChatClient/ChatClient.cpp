@@ -36,7 +36,7 @@ int  g_myID = -1;               //本机ID
 int  g_receiverID = -1;         //与之通信的id
 int  g_status = STATUS_DEFAULT; //客户端状态
 
-int processor(SOCKET _cSock);
+int receive_print_message(SOCKET _cSock);
 int cmdThread(SOCKET _sock);
 
 int main(int argc, char* argv[])
@@ -102,10 +102,11 @@ int main(int argc, char* argv[])
 	std::thread t1(cmdThread, _sock);
 	t1.detach();         //线程分离
 
+
+	fd_set fdRead;   //描述符(socket)集合
+	fd_set fdWrite;
+	fd_set fdExp;
 	while (g_bRun) {
-		fd_set fdRead;   //描述符(socket)集合
-		fd_set fdWrite;
-		fd_set fdExp;
 		//清理集合
 		FD_ZERO(&fdRead);
 		FD_ZERO(&fdWrite);
@@ -124,17 +125,19 @@ int main(int argc, char* argv[])
 			// 指定socket集合无事件发生。
 		}
 		else {
-			if (FD_ISSET(_sock, &fdRead)) {    //若该socket可读，接受数据
+			if (FD_ISSET(_sock, &fdRead)) {  //若该socket可读，接受数据
 				FD_CLR(_sock, &fdRead);
-				if (-1 == processor(_sock)) {
+				if (-1 == receive_print_message(_sock)) {
 					printf("processor failed\n");
 					break;
 				}
 			}
 			if (FD_ISSET(_sock, &fdWrite)) { //若该socket可写，发送数据
+				FD_CLR(_sock, &fdWrite);
 				// TODO
 			}
-			if (FD_ISSET(_sock, &fdExp)) { //若该socket异常
+			if (FD_ISSET(_sock, &fdExp)) {   //若该socket异常
+				FD_CLR(_sock, &fdExp);
 				// TODO
 			}
 		}
@@ -154,9 +157,10 @@ int main(int argc, char* argv[])
 }
 
 /*
-	处理接受到的消息
+	接受socket中的消息 并 打印出来。
+	不要在这里send数据！
 */
-int  processor(SOCKET _cSock)
+int  receive_print_message(SOCKET _cSock)
 {
 	char szRecv[4096] = {};  //缓冲区
 
@@ -234,8 +238,8 @@ int  processor(SOCKET _cSock)
 };
 
 /*
-   命令线程，用于接受用户输入的命令
-   不要在这里调用recv函数。
+   命令线程，用于接受用户输入的命令 并 发送相应的数据到服务器
+   不要在这里调用recv函数！
 */
 int cmdThread(SOCKET _sock) {
 	while (g_bRun) {
@@ -304,3 +308,43 @@ int cmdThread(SOCKET _sock) {
 	}
 	return 0;
 }
+
+/*
+	封装send函数，若出现错误，打印错误信息
+*/
+int my_send(SOCKET s, const char FAR* buf, int len, int flags) {
+	int send_result = send(s, buf, len, flags);
+	if (send_result == SOCKET_ERROR) {    // 如果发现错误，显示错误,方便调试
+		int lastError = WSAGetLastError();
+		printf("发送数据失败，错误码%d :", lastError);
+		switch (lastError)
+		{
+		case WSAEWOULDBLOCK: {
+			printf("WSAEWOULDBLOCK");  //该错误码说明发送缓冲区满了
+			break;
+		}
+		default:
+			break;
+		}
+		printf("  \n");
+	}
+	return send_result;
+}
+
+/* WIKI
+FD_WRITE事件触发条件：
+	1. client 通过connect（WSAConnect）首次和server建立连接时，在client端会触发FD_WRITE事件。
+	2. server 通过accept（WSAAccept）接受client连接请求时，在server端会触发FD_WRITE事件。
+	3. send（WSASend）/sendto（WSASendTo）发送失败返回WSAEWOULDBLOCK，并且当缓冲区有可用空间时，则会触发FD_WRITE事件。
+注：
+	1和2其实是同一种情况，在第一次建立连接时，C/S端都会触发一个FD_WRITE事件。
+	send出去的数据其实都先存在winsock的发送缓冲区中，然后才发送出去，如果缓冲区满了，那么
+再调用send（WSASend,sendto,WSASendTo）的话，就会返回一个 WSAEWOULDBLOCK的错误码，接下来随
+着发送缓冲区中的数据被发送出去，缓冲区中出现可用空间时，一个 FD_WRITE 事件才会被触发，这里
+比较容易混淆的是 FD_WRITE 触发的前提是 “缓冲区要先被充满然后随着数据的发送又出现可用空间”
+，而不是缓冲区中有可用空间。
+
+	因此，作为一个应用程序，自收到首条FD_WRITE消息开始，便应认为自己必然能在一个套接字上发
+出数据，直至一个send、WSASend、sendto或WSASendTo返回套接字错误WSAEWOULDBLOCK。经过了这样的
+失败以后，要再用另一条FD_WRITE通知应用程序再次发送数据。
+*/
