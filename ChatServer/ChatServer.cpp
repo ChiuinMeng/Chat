@@ -124,7 +124,14 @@ int main()
 					}
 				}
 			}
+		}
+		for (unsigned int i = 0; i < g_clients.size(); i++) {
 			if (FD_ISSET(g_clients[i], &fdWrite)) {    //该套接字可写
+				// TODO
+			}
+		}
+		for (unsigned int i = 0; i < g_clients.size(); i++) {
+			if (FD_ISSET(g_clients[i], &fdExp)) {    //该套接字异常
 				// TODO
 			}
 		}
